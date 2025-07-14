@@ -6,7 +6,7 @@ import telebot
 from html import escape
 from datetime import datetime, timedelta
 from util.logger import log
-from handlers.menu import get_menu_text
+from handlers.menu import get_menu_text ,send_main_menu
 from handlers.knowledge_base import get_knowledge_base_text
 from handlers.start_fast import handle_start_fast
 from handlers.stop_fast import handle_stop_fast
