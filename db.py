@@ -53,13 +53,11 @@ def save_fasting_session(telegram_id, start_time, fast_hours, stop_time):
     # Apply timezone offset (+3 hours)
     now_gmt3 = datetime.utcnow() + timedelta(hours=3)
     
-    print(now_gmt3)
-
     query = """
-        INSERT INTO fast_records (telegram_id, start_time, fast_hours, stop_time, created_at, updated_at,status)
+        INSERT INTO fast_records (telegram_id, start_time, fast_hours, stop_time, created_at, updated_at)
         VALUES (%s, %s, %s, %s, %s, %s)
     """
-    cursor.execute(query, (telegram_id, start_time, fast_hours, stop_time, now_gmt3, now_gmt3, 'active'))
+    cursor.execute(query, (telegram_id, start_time, fast_hours, stop_time, now_gmt3, now_gmt3))
 
     conn.commit()
     cursor.close()
@@ -134,5 +132,29 @@ def get_active_session(telegram_id):
     cursor.close()
     conn.close()
     return session
+
+def get_user_profile(telegram_id):
+  conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    try:
+        # Get user basic info
+        cursor.execute("SELECT * FROM users WHERE telegram_id = %s", (telegram_id,))
+        user = cursor.fetchone()
+
+        if not user:
+            return None, None
+
+        user_id = user['id']
+
+        # Get user profile info
+        cursor.execute("SELECT * FROM user_profiles WHERE user_id = %s", (user_id,))
+        profile = cursor.fetchone()
+
+        return user, profile
+    finally:
+        cursor.close()
+        conn.close()
+
 
 

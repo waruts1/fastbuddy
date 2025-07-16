@@ -3,14 +3,16 @@ from telebot import TeleBot
 from html import escape
 from db import get_connection
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton
+from util.logger import log
 
-# Store user states
-user_update_state = {}
 
 # Step 1: Ask which field to update
 from telebot.types import ReplyKeyboardRemove
 
-def start_profile_update(bot, chat_id):
+# Global state to track which step a user is in
+user_update_state = {}
+
+def start_profile_update(bot, name ,chat_id):
     # Remove keyboard to allow free text input
     bot.send_message(
         chat_id,
@@ -50,32 +52,73 @@ def handle_profile_update_reply(bot, message):
 
 
 def save_to_db(chat_id, field, value):
+    from db import get_connection  # assuming get_connection is in db.py
+
+    # Simple logger
+    def log_error(msg):
+        with open("/home/smiles/public_html/api/fastbuddy/bot-log.txt", "a") as f:
+            timestamp = (datetime.utcnow() + timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"[{timestamp}] [ERROR save_to_db] {msg}\n")
+
+    allowed_fields_users = ['email', 'phone']
+    allowed_fields_profile = ['weight', 'height', 'gender']
+
+    if field not in allowed_fields_users + allowed_fields_profile:
+        log_error(f"Rejected unknown field: {field}")
+        return
+
     conn = get_connection()
     cursor = conn.cursor()
 
-    user_query = "SELECT id FROM users WHERE telegram_id = %s"
-    cursor.execute(user_query, (chat_id,))
-    user = cursor.fetchone()
+    try:
+        # ✅ Ensure user exists
+        cursor.execute("SELECT id FROM users WHERE telegram_id = %s", (chat_id,))
+        user = cursor.fetchone()
 
-    if not user:
-        return
-
-    user_id = user[0]
-
-    if field in ['email', 'phone']:
-        cursor.execute(f"UPDATE users SET {field} = %s, updated_at = NOW() WHERE id = %s", (value, user_id))
-    else:
-        # Ensure user_profile exists
-        cursor.execute("SELECT id FROM user_profile WHERE user_id = %s", (user_id,))
-        profile = cursor.fetchone()
-
-        if profile:
-            cursor.execute(f"UPDATE user_profile SET {field}_kg = %s, updated_at = NOW() WHERE user_id = %s", (value, user_id)) if field == 'weight' \
-                else cursor.execute(f"UPDATE user_profile SET {field}_cm = %s, updated_at = NOW() WHERE user_id = %s", (value, user_id)) if field == 'height' \
-                else cursor.execute(f"UPDATE user_profile SET {field} = %s, updated_at = NOW() WHERE user_id = %s", (value, user_id))
+        if not user:
+            # Auto-register user with empty name
+            cursor.execute(
+                "INSERT INTO users (telegram_id, created_at, updated_at) VALUES (%s, NOW(), NOW())",
+                (chat_id,)
+            )
+            conn.commit()
+            user_id = cursor.lastrowid
         else:
-            cursor.execute("INSERT INTO user_profile (user_id, {0}, created_at, updated_at) VALUES (%s, %s, NOW(), NOW())".format(field), (user_id, value))
+            user_id = user[0]
 
-    conn.commit()
-    cursor.close()
-    conn.close()
+        if field in allowed_fields_users:
+            cursor.execute(
+                f"UPDATE users SET {field} = %s, updated_at = NOW() WHERE id = %s",
+                (value, user_id)
+            )
+        else:
+            # Ensure profile exists
+            cursor.execute("SELECT id FROM user_profile WHERE user_id = %s", (user_id,))
+            profile = cursor.fetchone()
+
+            if field == 'weight':
+                column = 'weight_kgs'
+            elif field == 'height':
+                column = 'height_cm'
+            else:
+                column = field  # gender, etc.
+
+            if profile:
+                cursor.execute(
+                    f"UPDATE user_profiles SET {column} = %s, updated_at = NOW() WHERE user_id = %s",
+                    (value, user_id)
+                )
+            else:
+                cursor.execute(
+                    f"INSERT INTO user_profiles (user_id, {column}, created_at, updated_at) VALUES (%s, %s, NOW(), NOW())",
+                    (user_id, value)
+                )
+
+        conn.commit()
+
+    except Exception as e:
+        log("Missing field in profile update", level="WARNING", feature="view_profile")
+        log_error(str(e))
+    finally:
+        cursor.close()
+        conn.close()

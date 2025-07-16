@@ -18,7 +18,6 @@ def handle_stop_fast(bot: TeleBot, chat_id: int):
     except ValueError:
         stop_time = datetime.strptime(stop_time_str, "%Y-%m-%d %H:%M:%S")
 
-    # Compare against current time +3 GMT (Kenya time)
     now_gmt3 = datetime.utcnow() + timedelta(hours=3)
 
     if stop_time >= now_gmt3:
@@ -26,5 +25,10 @@ def handle_stop_fast(bot: TeleBot, chat_id: int):
         add_star(chat_id)
         bot.send_message(chat_id, "🎉 Congratulations! You've completed your fast and earned a ⭐️ star!")
     else:
-        complete_session(session['id'])
-        bot.send_message(chat_id, "⏱ You stopped your fast early. Stay strong and try again next time!")
+        # Save pending confirmation state
+        pending_stop_confirmation[chat_id] = session['id']
+        bot.send_message(
+            chat_id,
+            "⚠️ You haven’t reached your fasting goal yet.\n"
+            "Do you still want to stop the fast? (Yes/No)"
+        )
