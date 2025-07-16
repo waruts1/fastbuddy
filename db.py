@@ -134,7 +134,7 @@ def get_active_session(telegram_id):
     return session
 
 def get_user_profile(telegram_id):
-  conn = get_connection()
+    conn = get_connection()
     cursor = conn.cursor(dictionary=True)
 
     try:
