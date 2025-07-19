@@ -1,11 +1,11 @@
-from db import get_connection , get_user_profile , user_exists
+from db import get_connection , get_user_profile_data , user_exists
 from html import escape
 from util.logger import log
 def handle_view_profile(bot, chat_id):
     try:
-        user, profile = get_full_user_profile(chat_id)
-
-        if not user:
+        user, profile = get_user_profile_data(chat_id)
+        log(f"[view profile handler INFO] {profile}", level="ERROR", feature="view_profile")
+        if not profile:
             bot.send_message(chat_id, "⚠️ You are not registered yet. Use /update_profile first.")
             return
 

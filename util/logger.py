@@ -1,18 +1,19 @@
-import os
-from datetime import datetime
 
+from datetime import datetime, timedelta
 # Set the default log file path
 LOG_FILE_PATH = "/home/smiles/public_html/api/fastbuddy/bot-log.txt"
 
 def log(message, level="INFO", feature=None):
     """
-    Logs a message with a timestamp, log level, and optional feature name.
+    Logs a message with a timestamp in GMT+3, log level, and optional feature name.
     
     :param message: The message to log
     :param level: Log level, e.g., INFO, ERROR
     :param feature: (Optional) Feature/module name for more clarity
     """
-    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    # Calculate GMT+3 timestamp
+    gmt3_offset = timedelta(hours=3)
+    timestamp = (datetime.utcnow() + gmt3_offset).strftime("%Y-%m-%d %H:%M:%S GMT+3")
     feature_str = f"[{feature}]" if feature else ""
     log_line = f"[{timestamp}] [{level.upper()}]{feature_str} {message}\n"
 

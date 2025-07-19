@@ -1,124 +1,67 @@
-from db import get_connection
-from telebot import TeleBot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
 from html import escape
-from db import get_connection
-from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 from util.logger import log
+from database.user_states import set_user_state, get_user_state, update_user_field
 
+def start_profile_update(bot, name, chat_id):
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("Gender", callback_data="update_gender"),
+        InlineKeyboardButton("Fast Hours", callback_data="update_fast_hours"),
+        InlineKeyboardButton("Weight", callback_data="update_weight"),
+        InlineKeyboardButton("Height", callback_data="update_height"),
+        InlineKeyboardButton("Email", callback_data="update_email"),
+        InlineKeyboardButton("Phone", callback_data="update_phone")
+    )
 
-# Step 1: Ask which field to update
-from telebot.types import ReplyKeyboardRemove
-
-# Global state to track which step a user is in
-user_update_state = {}
-
-def start_profile_update(bot, name ,chat_id):
-    # Remove keyboard to allow free text input
     bot.send_message(
         chat_id,
-        "📝 What would you like to update?\nYou can type: gender, weight, height, email, or phone.",
+        f"📝 Hi {name}, what would you like to update?\n\nTap one of the options below:",
+        reply_markup=markup
+    )
+
+    set_user_state(chat_id, 'choose_field', None)
+
+def handle_update_callback(bot, call):
+    chat_id = call.message.chat.id
+    field = call.data.replace("update_", "")
+    log(f"handle_update_callback called - chat_id: {chat_id}, field: {field}", level="INFO")
+
+    # Set state: awaiting input for this field
+    set_user_state(chat_id, 'awaiting_input', field)
+
+    bot.answer_callback_query(call.id)
+    bot.send_message(
+        chat_id,
+        f"✏️ Please enter your new {field.replace('_', ' ').title()}:",
         reply_markup=ReplyKeyboardRemove()
     )
-    user_update_state[chat_id] = {'step': 'choose_field'}
+    return "ok", 200
 
-# Step 2: Handle user reply
-def handle_profile_update_reply(bot, message):
+def handle_input_value(bot, message):
     chat_id = message.chat.id
-    state = user_update_state.get(chat_id)
+    new_value = message.text.strip()
+    state = get_user_state(chat_id)
 
-    if not state:
-        return
+    log(f"handle_input_value - chat_id: {chat_id}, state: {state}", level="INFO")
 
-    step = state['step']
-    text = message.text.strip().lower()
+    if not state or 'field' not in state or state['step'] != 'awaiting_input':
+        bot.send_message(chat_id, "❌ Sorry, I wasn't expecting that. Use /update_profile to start again.")
+        return "ok", 200
 
-    if step == 'choose_field':
-        if text in ['gender', 'weight', 'height', 'email', 'phone']:
-            user_update_state[chat_id] = {
-                'step': 'awaiting_value',
-                'field': text
-            }
-            bot.send_message(chat_id, f"Enter your new {text}:")
-        else:
-            bot.send_message(chat_id, "❌ Invalid choice. Please use /update_profile again.")
-            user_update_state.pop(chat_id, None)
+    field = state['field']
 
-    elif step == 'awaiting_value':
-        field = state['field']
-        value = text
-        save_to_db(chat_id, field, value)
-        bot.send_message(chat_id, f"✅ Your {field} has been updated.")
-        user_update_state.pop(chat_id, None)
-
-
-def save_to_db(chat_id, field, value):
-    from db import get_connection  # assuming get_connection is in db.py
-
-    # Simple logger
-    def log_error(msg):
-        with open("/home/smiles/public_html/api/fastbuddy/bot-log.txt", "a") as f:
-            timestamp = (datetime.utcnow() + timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S")
-            f.write(f"[{timestamp}] [ERROR save_to_db] {msg}\n")
-
-    allowed_fields_users = ['email', 'phone']
-    allowed_fields_profile = ['weight', 'height', 'gender']
-
-    if field not in allowed_fields_users + allowed_fields_profile:
-        log_error(f"Rejected unknown field: {field}")
-        return
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
+    # Update DB
     try:
-        # ✅ Ensure user exists
-        cursor.execute("SELECT id FROM users WHERE telegram_id = %s", (chat_id,))
-        user = cursor.fetchone()
-
-        if not user:
-            # Auto-register user with empty name
-            cursor.execute(
-                "INSERT INTO users (telegram_id, created_at, updated_at) VALUES (%s, NOW(), NOW())",
-                (chat_id,)
-            )
-            conn.commit()
-            user_id = cursor.lastrowid
-        else:
-            user_id = user[0]
-
-        if field in allowed_fields_users:
-            cursor.execute(
-                f"UPDATE users SET {field} = %s, updated_at = NOW() WHERE id = %s",
-                (value, user_id)
-            )
-        else:
-            # Ensure profile exists
-            cursor.execute("SELECT id FROM user_profile WHERE user_id = %s", (user_id,))
-            profile = cursor.fetchone()
-
-            if field == 'weight':
-                column = 'weight_kgs'
-            elif field == 'height':
-                column = 'height_cm'
-            else:
-                column = field  # gender, etc.
-
-            if profile:
-                cursor.execute(
-                    f"UPDATE user_profiles SET {column} = %s, updated_at = NOW() WHERE user_id = %s",
-                    (value, user_id)
-                )
-            else:
-                cursor.execute(
-                    f"INSERT INTO user_profiles (user_id, {column}, created_at, updated_at) VALUES (%s, %s, NOW(), NOW())",
-                    (user_id, value)
-                )
-
-        conn.commit()
-
+        update_user_field(chat_id, field, new_value)
     except Exception as e:
-        log("Missing field in profile update", level="WARNING", feature="view_profile")
-        log_error(str(e))
-    finally:
-        cursor.close()
-        conn.close()
+        log(f"Failed to update user field: {str(e)}", level="ERROR")
+        bot.send_message(chat_id, "❌ Failed to update your data. Please try again.")
+        return "ok", 200
+
+    bot.send_message(chat_id, f"✅ Your {field.replace('_', ' ')} has been updated to: {new_value}")
+
+    # Clear user state after success
+    set_user_state(chat_id, None, None)
+
+    return "ok", 200

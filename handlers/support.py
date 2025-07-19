@@ -12,7 +12,7 @@ def send_support_menu(bot, chat_id):
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     keyboard.row(KeyboardButton("📩 Feedback"), KeyboardButton("📞 Contact Us"))
     keyboard.row(KeyboardButton("❌ Cancel"))
-
+    markup.row(KeyboardButton("/menu"))
     bot.send_message(chat_id, "How can we help you?", reply_markup=keyboard)
     user_support_state[chat_id] = "awaiting_choice"
 

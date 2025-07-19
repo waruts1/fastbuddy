@@ -6,47 +6,39 @@ import telebot
 from html import escape
 from datetime import datetime, timedelta
 from util.logger import log
-from handlers.menu import get_menu_text ,send_main_menu
+from handlers.menu import get_menu_text ,send_main_menu , send_users_submenu , send_fasting_submenu , get_feedback_keyboard
 from handlers.knowledge_base import get_knowledge_base_text
 from handlers.start_fast import handle_start_fast
 from handlers.stop_fast import handle_stop_fast
 from handlers.view_profile import handle_view_profile
 from handlers.calorie_lookup import get_nutrition_info
-from handlers.update_profile import start_profile_update , handle_profile_update_reply
-from handlers.support import handle_support_reply
+from handlers.update_profile import start_profile_update , handle_update_callback , handle_input_value
+from handlers.support import handle_support_reply , send_support_menu
+from handlers.progress import handle_progress
 import json
-
-
+from handlers.start import handle_start
+from handlers.status import handle_status
+from db import get_pending_confirmation, delete_pending_confirmation, complete_session
+from database.user_states import set_user_state, get_user_state
+from handlers.confirm_stop import handle_stop_confirmation
+from handlers.edit_fast import handle_edit_fast
 # Load environment variables
 load_dotenv()
 now = datetime.utcnow()
 # Flask app
 app = Flask(__name__)
-user_update_state = {}
+
 # Telegram bot
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("Missing BOT_TOKEN in environment.")
 bot = telebot.TeleBot(BOT_TOKEN)
 pending_stop_confirmation = {}
+user_update_profile = {}
+
 # Add current dir to path
 sys.path.insert(0, os.path.dirname(__file__))
 
-# Import database helpers (or fallbacks)
-# try:
-#     from db import user_exists, save_user , has_active_session , get_active_session, complete_session, add_star
-# except ImportError:
-#     def user_exists(user_id): return False
-#     def save_user(user_id, name): pass
-
-# --- Web Routes ---
-# def get_feedback_keyboard():
-#     markup = InlineKeyboardMarkup()
-#     markup.add(InlineKeyboardButton("Suggest a Feature", callback_data='feature'))
-#     markup.add(InlineKeyboardButton("File a Complaint", callback_data='complaint'))
-#     markup.add(InlineKeyboardButton("Report a Bug", callback_data='bug'))
-#     return markup
-    
 @app.route("/")
 def index():
     return "âœ… FastBuddy bot is live."
@@ -55,36 +47,51 @@ def index():
 def hello():
     return "ðŸ‘‹ Hello from FastBuddy!"
 
+
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
         update_json = request.get_json(force=True)
         update = telebot.types.Update.de_json(update_json)
-        message = update.message
-        name = escape(message.from_user.first_name or "there")
 
+        if update.callback_query:
+            call = update.callback_query
+            chat_id = call.message.chat.id
+            data = call.data
+            log(f"[Webhook INFO] Received callback: {data}", level="INFO")
+
+            if data.startswith("update_"):
+                return handle_update_callback(bot, call)
+
+            return "ok", 200
+
+        message = update.message
+        if not message:
+            return "ok", 200  # no message to handle
+
+        chat_id = message.chat.id
+        name = escape(message.from_user.first_name or "there")
+        text = (message.text or "").strip().lower()
+
+        # Handle state-based input first
+        state = get_user_state(chat_id)
+        if state and state.get('step') == 'awaiting_input':
+            return handle_input_value(bot, message)
+
+        # Your other command handlers...
+        if text == '/update_profile':
+            start_profile_update(bot, name, chat_id)
+            return "ok", 200
+        
         if message:
             chat_id = message.chat.id
             text = message.text.strip().lower()
 
-            # Step 1: Handle pending stop confirmation first
-            if chat_id in pending_stop_confirmation:
-                response = text.lower()
-                if response in ['yes', 'y']:
-                    session_id = pending_stop_confirmation.pop(chat_id)
-                    complete_session(session_id)
-                    bot.send_message(chat_id, "⏱ You stopped your fast early. Stay strong and try again next time!")
-                elif response in ['no', 'n']:
-                    pending_stop_confirmation.pop(chat_id)
-                    bot.send_message(chat_id, "👍 Keep going! You're doing great!")
-                else:
-                    bot.send_message(chat_id, "❓ Please reply with 'Yes' or 'No'")
-                return "ok", 200  # stop further processing
-
-            # Step 2: Regular command handling
+        # other commands here...
+        # Step 2: Regular command handling
             if text == '/start':
-                bot.send_message(chat_id, f"Hi <b>{name}</b>, welcome to <b>FastBuddy</b> 🚀", parse_mode='HTML')
-                bot.send_message(chat_id, "/help - display commands to assist 🚀", parse_mode='HTML')
+                handle_start(bot,message)
 
             elif text == '/menu':
                 send_main_menu(bot, chat_id)
@@ -118,6 +125,7 @@ def webhook():
                 handle_view_profile(bot, chat_id)
 
             elif text == '/update_profile':
+                log(f"[App.py INFO update_profile] {user_update_profile}", level="WARNING", feature="start_profile_update")
                 start_profile_update(bot, name, chat_id)
             
             elif text == '/status':
@@ -127,17 +135,16 @@ def webhook():
                 bot.send_message(chat_id, "❌ Invalid option. Please choose from the menu below.")
                 bot.send_message(chat_id, get_menu_text(), parse_mode='HTML')
 
-            elif chat_id in user_update_state:
-                handle_profile_update_reply(bot, message)
-
             else:
                 handle_support_reply(bot, message)
 
         return "ok", 200
 
     except Exception as e:
-        log(f"[App.py ERROR webhook] {str(e)}", level="WARNING", feature="telegram_webhook")
+        log(f"[App.py ERROR webhook] {str(e)}", level="ERROR", feature="telegram_webhook")
         return "error", 500
+
+
 
 # WSGI entry point
 application = app

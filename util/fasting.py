@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from db import save_fasting_session
 
 def start_fast(telegram_id, fast_hours):
-    start_time = datetime.utcnow()
+    start_time = datetime.utcnow() + timedelta(hours=3)
     stop_time = start_time + timedelta(hours=fast_hours)
 
     # Save to DB (you implement save_fasting_session in db.py)
